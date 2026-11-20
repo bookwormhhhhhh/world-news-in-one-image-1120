@@ -1,437 +1,458 @@
-#!/usr/bin/env python3
-"""
-Sum up 20 November 2026's world news in one image.
+"""WORLD NEWS -- the front page of Friday 20 November 2026 as one PNG.
 
-Pure Python 3 standard library only (zlib + struct for the PNG encoder).
-Running this program writes a 1024x1024 PNG newspaper front page to
-/output/entry.png (falling back to ./entry.png if /output is not writable).
+Standard library only. Deterministic: the same bytes are produced on
+every run. Writes the image to /output/entry.png (1024 x 1024).
 """
+
 import math
 import os
 import struct
 import zlib
 
-W = H = 1024
+W = 1024
+H = 1024
 
-# --------------------------------------------------------------------------
-# 5x7 bitmap font. Each glyph: 7 rows of 5 pixels ('#' = on).
-# --------------------------------------------------------------------------
+PAPER = (246, 242, 230)
+PANEL_BG = (253, 251, 245)
+INK = (26, 28, 38)
+NAVY = (16, 30, 62)
+GOLD = (206, 158, 44)
+RED = (172, 34, 30)
+WHITE = (250, 248, 240)
+GREY = (105, 104, 98)
+
+# ---------------------------------------------------------------------------
+# A tiny 5x7 bitmap font, drawn by hand for this program.
+# Each glyph is seven rows of five pixels; '#' is ink, '.' is blank.
+# ---------------------------------------------------------------------------
 FONT = {
-    'A': (".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"),
-    'B': ("####.", "#...#", "#...#", "####.", "#...#", "#...#", "####."),
-    'C': (".####", "#....", "#....", "#....", "#....", "#....", ".####"),
-    'D': ("####.", "#...#", "#...#", "#...#", "#...#", "#...#", "####."),
-    'E': ("#####", "#....", "#....", "####.", "#....", "#....", "#####"),
-    'F': ("#####", "#....", "#....", "####.", "#....", "#....", "#...."),
-    'G': (".####", "#....", "#....", "#.###", "#...#", "#...#", ".###."),
-    'H': ("#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"),
-    'I': ("#####", "..#..", "..#..", "..#..", "..#..", "..#..", "#####"),
-    'J': ("..###", "...#.", "...#.", "...#.", "...#.", "#..#.", ".##.."),
-    'K': ("#...#", "#..#.", "#.#..", "##...", "#.#..", "#..#.", "#...#"),
-    'L': ("#....", "#....", "#....", "#....", "#....", "#....", "#####"),
-    'M': ("#...#", "##.##", "#.#.#", "#.#.#", "#...#", "#...#", "#...#"),
-    'N': ("#...#", "##..#", "##..#", "#.#.#", "#..##", "#..##", "#...#"),
-    'O': (".###.", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."),
-    'P': ("####.", "#...#", "#...#", "####.", "#....", "#....", "#...."),
-    'Q': (".###.", "#...#", "#...#", "#...#", "#.#.#", "#..#.", ".##.#"),
-    'R': ("####.", "#...#", "#...#", "####.", "#.#..", "#..#.", "#...#"),
-    'S': (".####", "#....", "#....", ".###.", "....#", "....#", "####."),
-    'T': ("#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."),
-    'U': ("#...#", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."),
-    'V': ("#...#", "#...#", "#...#", "#...#", "#...#", ".#.#.", "..#.."),
-    'W': ("#...#", "#...#", "#...#", "#.#.#", "#.#.#", "##.##", "#...#"),
-    'X': ("#...#", ".#.#.", "..#..", "..#..", "..#..", ".#.#.", "#...#"),
-    'Y': ("#...#", "#...#", ".#.#.", "..#..", "..#..", "..#..", "..#.."),
-    'Z': ("#####", "....#", "...#.", "..#..", ".#...", "#....", "#####"),
-    '0': (".###.", "#..##", "#.#.#", "##..#", "#...#", "#...#", ".###."),
-    '1': ("..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."),
-    '2': (".###.", "#...#", "....#", "...#.", "..#..", ".#...", "#####"),
-    '3': ("#####", "...#.", "..#..", "...#.", "....#", "#...#", ".###."),
-    '4': ("...#.", "..##.", ".#.#.", "#..#.", "#####", "...#.", "...#."),
-    '5': ("#####", "#....", "####.", "....#", "....#", "#...#", ".###."),
-    '6': (".###.", "#....", "#....", "####.", "#...#", "#...#", ".###."),
-    '7': ("#####", "....#", "...#.", "..#..", "..#..", "..#..", "..#.."),
-    '8': (".###.", "#...#", "#...#", ".###.", "#...#", "#...#", ".###."),
-    '9': (".###.", "#...#", "#...#", ".####", "....#", "....#", ".###."),
-    ' ': (".....", ".....", ".....", ".....", ".....", ".....", "....."),
-    '.': (".....", ".....", ".....", ".....", ".....", ".##..", ".##.."),
-    ',': (".....", ".....", ".....", ".....", ".##..", ".##..", ".#..."),
-    ':': (".....", ".##..", ".##..", ".....", ".##..", ".##..", "....."),
-    '-': (".....", ".....", ".....", "#####", ".....", ".....", "....."),
+    "A": (".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"),
+    "B": ("####.", "#...#", "#...#", "####.", "#...#", "#...#", "####."),
+    "C": (".####", "#....", "#....", "#....", "#....", "#....", ".####"),
+    "D": ("####.", "#...#", "#...#", "#...#", "#...#", "#...#", "####."),
+    "E": ("#####", "#....", "#....", "####.", "#....", "#....", "#####"),
+    "F": ("#####", "#....", "#....", "####.", "#....", "#....", "#...."),
+    "G": (".####", "#....", "#....", "#.###", "#...#", "#...#", ".###."),
+    "H": ("#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"),
+    "I": (".###.", "..#..", "..#..", "..#..", "..#..", "..#..", ".###."),
+    "J": ("..###", "...#.", "...#.", "...#.", "...#.", "#..#.", ".##.."),
+    "K": ("#...#", "#..#.", "#.#..", "##...", "#.#..", "#..#.", "#...#"),
+    "L": ("#....", "#....", "#....", "#....", "#....", "#....", "#####"),
+    "M": ("#...#", "##.##", "#.#.#", "#.#.#", "#...#", "#...#", "#...#"),
+    "N": ("#...#", "#...#", "##..#", "#.#.#", "#..##", "#...#", "#...#"),
+    "O": (".###.", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."),
+    "P": ("####.", "#...#", "#...#", "####.", "#....", "#....", "#...."),
+    "Q": (".###.", "#...#", "#...#", "#...#", "#.#.#", "#..#.", ".##.#"),
+    "R": ("####.", "#...#", "#...#", "####.", "#.#..", "#..#.", "#...#"),
+    "S": (".####", "#....", "#....", ".###.", "....#", "....#", "####."),
+    "T": ("#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."),
+    "U": ("#...#", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."),
+    "V": ("#...#", "#...#", "#...#", "#...#", "#...#", ".#.#.", "..#.."),
+    "W": ("#...#", "#...#", "#...#", "#.#.#", "#.#.#", "##.##", "#...#"),
+    "X": ("#...#", ".#.#.", "..#..", "..#..", "..#..", ".#.#.", "#...#"),
+    "Y": ("#...#", "#...#", ".#.#.", "..#..", "..#..", "..#..", "..#.."),
+    "Z": ("#####", "....#", "...#.", "..#..", ".#...", "#....", "#####"),
+    "0": (".###.", "#...#", "#..##", "#.#.#", "##..#", "#...#", ".###."),
+    "1": ("..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."),
+    "2": (".###.", "#...#", "....#", "...#.", "..#..", ".#...", "#####"),
+    "3": (".###.", "#...#", "....#", "..##.", "....#", "#...#", ".###."),
+    "4": ("...#.", "..##.", ".#.#.", "#..#.", "#####", "...#.", "...#."),
+    "5": ("#####", "#....", "####.", "....#", "....#", "#...#", ".###."),
+    "6": (".###.", "#....", "#....", "####.", "#...#", "#...#", ".###."),
+    "7": ("#####", "....#", "...#.", "..#..", "..#..", "..#..", "..#.."),
+    "8": (".###.", "#...#", "#...#", ".###.", "#...#", "#...#", ".###."),
+    "9": (".###.", "#...#", "#...#", ".####", "....#", "....#", ".###."),
+    " ": (".....", ".....", ".....", ".....", ".....", ".....", "....."),
+    ".": (".....", ".....", ".....", ".....", ".....", ".##..", ".##.."),
+    ",": (".....", ".....", ".....", ".....", ".##..", ".##..", ".#..."),
     "'": ("..#..", "..#..", ".#...", ".....", ".....", ".....", "....."),
-    '&': (".##..", "#..#.", "#.#..", ".#...", "#.#.#", "#..#.", ".##.#"),
-    '!': ("..#..", "..#..", "..#..", "..#..", "..#..", ".....", "..#.."),
-    '$': ("..#..", ".####", "##.#.", ".###.", ".#.##", "####.", "..#.."),
-    '/': ("....#", "...#.", "...#.", "..#..", ".#...", ".#...", "#...."),
+    "-": (".....", ".....", ".....", "#####", ".....", ".....", "....."),
+    ":": (".....", ".##..", ".##..", ".....", ".##..", ".##..", "....."),
+    "+": (".....", "..#..", "..#..", ".###.", "..#..", "..#..", "....."),
+    "$": ("..#..", ".####", "#.#..", ".###.", "..#.#", "####.", "..#.."),
+    "%": ("##..#", "##.#.", "....#", "...#.", "..#..", ".#...", "#..##"),
+    "/": ("....#", "....#", "...#.", "..#..", ".#...", "#....", "#...."),
+    "(": ("...#.", "..#..", "..#..", "..#..", "..#..", "..#..", "...#."),
+    ")": (".#...", "..#..", "..#..", "..#..", "..#..", "..#..", ".#..."),
+    "!": ("..#..", "..#..", "..#..", "..#..", "..#..", ".....", "..#.."),
+    "?": (".###.", "#...#", "....#", "...#.", "..#..", ".....", "..#.."),
 }
 
-
-# --------------------------------------------------------------------------
-# Canvas + minimal PNG writer (RGB, filter 0, zlib-compressed IDAT).
-# --------------------------------------------------------------------------
-class Canvas:
-    def __init__(self, w, h, bg):
-        self.w, self.h = w, h
-        self.px = bytearray(bg) * (w * h)
-
-    def set(self, x, y, color):
-        if 0 <= x < self.w and 0 <= y < self.h:
-            i = (y * self.w + x) * 3
-            self.px[i:i + 3] = bytes(color)
-
-    def save(self, path):
-        raw = bytearray()
-        stride = self.w * 3
-        for y in range(self.h):
-            raw.append(0)
-            raw += self.px[y * stride:(y + 1) * stride]
-
-        def chunk(tag, data):
-            c = struct.pack(">I", len(data)) + tag + data
-            return c + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
-
-        png = b"\x89PNG\r\n\x1a\n"
-        png += chunk(b"IHDR", struct.pack(">IIBBBBB", self.w, self.h, 8, 2, 0, 0, 0))
-        png += chunk(b"IDAT", zlib.compress(bytes(raw), 9))
-        png += chunk(b"IEND", b"")
-        with open(path, "wb") as f:
-            f.write(png)
+BLANK_GLYPH = FONT[" "]
 
 
-# --------------------------------------------------------------------------
-# Drawing primitives.
-# --------------------------------------------------------------------------
-def fill_rect(cv, x, y, w, h, color):
-    for yy in range(int(y), int(y + h)):
-        for xx in range(int(x), int(x + w)):
-            cv.set(xx, yy, color)
+# ---------------------------------------------------------------------------
+# Canvas and drawing primitives. The canvas is a flat RGB bytearray.
+# ---------------------------------------------------------------------------
+def new_canvas():
+    px = bytearray(W * H * 3)
+    r, g, b = PAPER
+    for i in range(0, len(px), 3):
+        px[i] = r
+        px[i + 1] = g
+        px[i + 2] = b
+    return px
 
 
-def rect_outline(cv, x, y, w, h, color, t=2):
-    fill_rect(cv, x, y, w, t, color)
-    fill_rect(cv, x, y + h - t, w, t, color)
-    fill_rect(cv, x, y, t, h, color)
-    fill_rect(cv, x + w - t, y, t, h, color)
+def set_px(px, x, y, color):
+    if 0 <= x < W and 0 <= y < H:
+        i = (y * W + x) * 3
+        px[i] = color[0]
+        px[i + 1] = color[1]
+        px[i + 2] = color[2]
 
 
-def line(cv, x0, y0, x1, y1, color, t=1):
-    """Thick line: stamp a small filled disc along a Bresenham path."""
-    dx, dy = abs(x1 - x0), abs(y1 - y0)
+def fill_rect(px, x, y, w, h, color):
+    for yy in range(y, y + h):
+        if 0 <= yy < H:
+            base = yy * W * 3
+            for xx in range(x, x + w):
+                if 0 <= xx < W:
+                    i = base + xx * 3
+                    px[i] = color[0]
+                    px[i + 1] = color[1]
+                    px[i + 2] = color[2]
+
+
+def rect_outline(px, x, y, w, h, color, thick=2):
+    fill_rect(px, x, y, w, thick, color)
+    fill_rect(px, x, y + h - thick, w, thick, color)
+    fill_rect(px, x, y, thick, h, color)
+    fill_rect(px, x + w - thick, y, thick, h, color)
+
+
+def draw_line(px, x0, y0, x1, y1, color, thick=2):
+    """Bresenham line with a square brush of the given thickness."""
+    dx = abs(x1 - x0)
+    dy = -abs(y1 - y0)
     sx = 1 if x0 < x1 else -1
     sy = 1 if y0 < y1 else -1
-    err, x, y = dx - dy, x0, y0
+    err = dx + dy
+    off = thick // 2
     while True:
-        if t <= 1:
-            cv.set(x, y, color)
-        else:
-            fill_circle(cv, x, y, t // 2, color)
-        if x == x1 and y == y1:
+        fill_rect(px, x0 - off, y0 - off, thick, thick, color)
+        if x0 == x1 and y0 == y1:
             break
         e2 = 2 * err
-        if e2 > -dy:
-            err -= dy
-            x += sx
-        if e2 < dx:
+        if e2 >= dy:
+            err += dy
+            x0 += sx
+        if e2 <= dx:
             err += dx
-            y += sy
+            y0 += sy
 
 
-def fill_circle(cv, cx, cy, r, color):
-    for dy in range(-r, r + 1):
-        dx = int(math.sqrt(max(0, r * r - dy * dy)))
-        fill_rect(cv, cx - dx, cy + dy, 2 * dx + 1, 1, color)
-
-
-def circle_outline(cv, cx, cy, r, color, t=2):
+def circle_outline(px, cx, cy, r, color, thick=2):
     steps = max(24, int(2 * math.pi * r))
     for i in range(steps + 1):
         a = 2 * math.pi * i / steps
-        fill_circle(cv, int(cx + r * math.cos(a)), int(cy + r * math.sin(a)), t // 2, color)
+        x = int(round(cx + r * math.cos(a)))
+        y = int(round(cy + r * math.sin(a)))
+        off = thick // 2
+        fill_rect(px, x - off, y - off, thick, thick, color)
 
 
-def fill_polygon(cv, pts, color):
-    ys = [p[1] for p in pts]
-    for y in range(min(ys), max(ys) + 1):
-        nodes = []
-        n = len(pts)
-        for i in range(n):
-            x0, y0 = pts[i]
-            x1, y1 = pts[(i + 1) % n]
-            if (y0 <= y < y1) or (y1 <= y < y0):
-                nodes.append(int(x0 + (y - y0) * (x1 - x0) / (y1 - y0)))
-        nodes.sort()
-        for i in range(0, len(nodes) - 1, 2):
-            fill_rect(cv, nodes[i], y, nodes[i + 1] - nodes[i] + 1, 1, color)
-
-
-def dashed_bezier(cv, p0, p1, p2, color):
-    """Dashed quadratic bezier from p0 (control p1) to p2: a missile trail."""
-    steps = 90
+def arc(px, cx, cy, r, a0, a1, color, thick=2):
+    """Draw an arc from angle a0 to a1 (radians, screen coords, y down)."""
+    steps = max(12, int(abs(a1 - a0) * r))
     for i in range(steps + 1):
-        if (i // 5) % 2 == 0:
-            t = i / steps
-            x = int((1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t ** 2 * p2[0])
-            y = int((1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t ** 2 * p2[1])
-            fill_circle(cv, x, y, 2, color)
+        a = a0 + (a1 - a0) * i / steps
+        x = int(round(cx + r * math.cos(a)))
+        y = int(round(cy + r * math.sin(a)))
+        off = thick // 2
+        fill_rect(px, x - off, y - off, thick, thick, color)
 
 
-# --------------------------------------------------------------------------
-# Text.
-# --------------------------------------------------------------------------
-def text_width(s, scale, bold=False):
-    if not s:
+def starburst(px, cx, cy, radius, color):
+    for k in range(8):
+        a = math.pi * k / 4.0
+        x1 = int(round(cx + radius * math.cos(a)))
+        y1 = int(round(cy + radius * math.sin(a)))
+        draw_line(px, cx, cy, x1, y1, color, 3)
+    fill_rect(px, cx - 2, cy - 2, 5, 5, color)
+
+
+# ---------------------------------------------------------------------------
+# Text rendering.
+# ---------------------------------------------------------------------------
+def text_width(text, scale):
+    if not text:
         return 0
-    w = len(s) * 6 * scale - scale
-    return w + (max(1, scale // 3) if bold else 0)
+    return len(text) * 6 * scale - scale
 
 
-def draw_text(cv, x, y, s, scale, color, bold=False):
-    extra = max(1, scale // 3)
-    for ch in s.upper():
-        glyph = FONT.get(ch, FONT[' '])
-        for ry, row in enumerate(glyph):
-            for rx, c in enumerate(row):
-                if c == '#':
-                    fill_rect(cv, x + rx * scale, y + ry * scale, scale, scale, color)
-                    if bold:
-                        fill_rect(cv, x + rx * scale + extra, y + ry * scale, scale, scale, color)
-        x += 6 * scale
-    return x
+def draw_text(px, x, y, text, scale, color):
+    cx = x
+    for ch in text.upper():
+        glyph = FONT.get(ch, BLANK_GLYPH)
+        for row_i, row in enumerate(glyph):
+            for col_i, cell in enumerate(row):
+                if cell == "#":
+                    fill_rect(px, cx + col_i * scale, y + row_i * scale,
+                              scale, scale, color)
+        cx += 6 * scale
+    return cx
 
 
-def center_text(cv, cx, y, s, scale, color, bold=False):
-    draw_text(cv, cx - text_width(s, scale, bold) // 2, y, s, scale, color, bold)
+def draw_text_centered(px, cx, y, text, scale, color):
+    w = text_width(text, scale)
+    draw_text(px, cx - w // 2, y, text, scale, color)
 
 
-# --------------------------------------------------------------------------
-# Palette.
-# --------------------------------------------------------------------------
-PAPER = (246, 241, 227)
-CARD = (253, 251, 244)
-INK = (26, 26, 32)
-GRAY = (96, 94, 88)
-NAVY = (18, 22, 56)
-GOLD = (240, 198, 92)
-WHITE = (255, 255, 255)
+def draw_text_right(px, right_x, y, text, scale, color):
+    w = text_width(text, scale)
+    draw_text(px, right_x - w, y, text, scale, color)
 
 
-# --------------------------------------------------------------------------
-# Icons. Each paints inside the zone (ix, iy, iw=448, ih=140).
-# --------------------------------------------------------------------------
-def icon_kyiv(cv, ix, iy):
-    """Night skyline under a missile barrage; a gold-domed cathedral."""
-    fill_rect(cv, ix, iy, 448, 140, (14, 18, 36))
-    seed = 777                                              # deterministic stars
-    for _ in range(46):
-        seed = (1103515245 * seed + 12345) % (2 ** 31)
-        sx = ix + seed % 448
-        seed = (1103515245 * seed + 12345) % (2 ** 31)
-        sy = iy + seed % 84
-        fill_circle(cv, sx, sy, 1, (210, 214, 240))
-    fill_circle(cv, ix + 404, iy + 26, 11, (232, 230, 205))  # moon
-    fill_circle(cv, ix + 399, iy + 23, 10, (14, 18, 36))
-    dark = (30, 32, 48)
-    bx = ix                                                 # skyline
-    for bw, bh in ((52, 44), (40, 62), (58, 38), (36, 70), (54, 48),
-                   (42, 58), (56, 42), (38, 64), (52, 46)):
-        fill_rect(cv, bx, iy + 140 - bh, bw, bh, dark)
-        for wy in range(iy + 140 - bh + 7, iy + 132, 12):   # lit windows
-            for wx in range(bx + 6, bx + bw - 6, 11):
-                if (wx * 7 + wy * 13) % 5 == 0:
-                    fill_rect(cv, wx, wy, 4, 5, (255, 214, 110))
-        bx += bw
-    cx = ix + 224                                           # cathedral
-    fill_rect(cv, cx - 17, iy + 74, 34, 66, (44, 48, 66))
-    rect_outline(cv, cx - 17, iy + 74, 34, 66, INK, 2)
-    fill_circle(cv, cx, iy + 66, 21, GOLD)                  # onion dome
-    fill_polygon(cv, [(cx - 8, iy + 52), (cx + 8, iy + 52), (cx, iy + 34)], GOLD)
-    fill_rect(cv, cx - 1, iy + 22, 3, 12, GOLD)             # cross
-    fill_rect(cv, cx - 5, iy + 26, 11, 3, GOLD)
-    for sx, sy in ((cx - 52, iy + 96), (cx + 54, iy + 88)):  # side towers
-        fill_rect(cv, sx - 10, sy, 20, iy + 140 - sy, (44, 48, 66))
-        fill_circle(cv, sx, sy - 4, 12, GOLD)
-        fill_rect(cv, sx - 1, sy - 24, 3, 9, GOLD)
-        fill_rect(cv, sx - 4, sy - 21, 9, 3, GOLD)
-    dashed_bezier(cv, (ix + 18, iy + 6), (ix + 120, iy + 30), (ix + 168, iy + 100), (255, 120, 90))
-    dashed_bezier(cv, (ix + 430, iy + 4), (ix + 330, iy + 26), (ix + 292, iy + 96), (255, 120, 90))
-    dashed_bezier(cv, (ix + 90, iy + 2), (ix + 190, iy + 18), (ix + 238, iy + 84), GOLD)
-    for fx, fy in ((ix + 168, iy + 104), (ix + 292, iy + 100)):   # impact flashes
-        fill_circle(cv, fx, fy, 13, (255, 150, 60))
-        fill_circle(cv, fx, fy, 7, (255, 214, 130))
-        fill_circle(cv, fx, fy, 3, WHITE)
-    fill_rect(cv, ix, iy + 137, 448, 3, INK)
+# ---------------------------------------------------------------------------
+# Panel icons. Each is drawn around a centre point (cx, cy).
+# ---------------------------------------------------------------------------
+def icon_bridge(px, cx, cy):
+    """A river bridge under attack: pylons, cables, a drone, a burst."""
+    deck_y = cy + 20
+    fill_rect(px, cx - 74, deck_y, 148, 5, INK)
+    fill_rect(px, cx - 48, cy - 18, 6, deck_y - (cy - 18), INK)
+    fill_rect(px, cx + 42, cy - 18, 6, deck_y - (cy - 18), INK)
+    # Suspension cables fanning from the pylon tops.
+    draw_line(px, cx - 45, cy - 18, cx - 74, deck_y, INK, 2)
+    draw_line(px, cx - 45, cy - 18, cx - 16, deck_y, INK, 2)
+    draw_line(px, cx + 45, cy - 18, cx + 74, deck_y, INK, 2)
+    draw_line(px, cx + 45, cy - 18, cx + 16, deck_y, INK, 2)
+    # Sagging main cable between the pylons.
+    for t in range(21):
+        fx = -45 + (90 * t) / 20.0
+        fy = -18 + 20 * (1 - (fx / 45.0) ** 2)
+        fill_rect(px, int(cx + fx) - 1, int(cy + fy) - 1, 3, 3, INK)
+    # Water below the deck.
+    for wx in range(cx - 70, cx + 66, 16):
+        fill_rect(px, wx, cy + 34, 9, 2, NAVY)
+    # A drone overhead.
+    dx, dy = cx - 56, cy - 34
+    fill_rect(px, dx - 5, dy - 2, 11, 4, INK)
+    draw_line(px, dx - 10, dy - 6, dx + 10, dy + 4, INK, 2)
+    draw_line(px, dx - 10, dy + 4, dx + 10, dy - 6, INK, 2)
+    # Impact burst at the right pylon.
+    starburst(px, cx + 45, deck_y - 2, 11, RED)
 
 
-def icon_climate(cv, ix, iy):
-    """A warming globe: rising heat line, blazing sun, high thermometer."""
-    fill_rect(cv, ix, iy, 448, 140, (186, 216, 234))
-    gx, gy, gr = ix + 96, iy + 74, 52                       # globe
-    fill_circle(cv, gx, gy, gr, (84, 148, 208))
-    for dx, dy, r in ((-22, -18, 15), (8, -26, 11), (24, 2, 14),
-                      (-6, 16, 16), (-30, 10, 9), (16, 30, 8)):
-        fill_circle(cv, gx + dx, gy + dy, r, (92, 178, 105))
-    circle_outline(cv, gx, gy, gr, (40, 90, 140), 2)
-    sx, sy = ix + 396, iy + 30                              # sun
-    fill_circle(cv, sx, sy, 15, (250, 176, 60))
-    for a in range(8):
-        x1 = int(sx + 21 * math.cos(a * math.pi / 4))
-        y1 = int(sy + 21 * math.sin(a * math.pi / 4))
-        x2 = int(sx + 29 * math.cos(a * math.pi / 4))
-        y2 = int(sy + 29 * math.sin(a * math.pi / 4))
-        line(cv, x1, y1, x2, y2, (250, 176, 60), 3)
-    tx = ix + 330                                           # thermometer
-    fill_rect(cv, tx, iy + 18, 16, 88, WHITE)
-    rect_outline(cv, tx, iy + 18, 16, 88, INK, 2)
-    fill_rect(cv, tx + 4, iy + 34, 8, 72, (216, 48, 44))
-    fill_circle(cv, tx + 8, iy + 116, 14, (216, 48, 44))
-    circle_outline(cv, tx + 8, iy + 116, 14, INK, 2)
-    for k in range(4):
-        fill_rect(cv, tx - 10, iy + 28 + k * 20, 7, 2, INK)
-    pts = [(ix + 176, iy + 116), (ix + 216, iy + 100), (ix + 250, iy + 106),
-           (ix + 282, iy + 78), (ix + 306, iy + 84)]        # rising heat line
-    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
-        line(cv, x0, y0, x1, y1, (216, 48, 44), 4)
-    line(cv, ix + 306, iy + 84, ix + 292, iy + 82, (216, 48, 44), 4)   # arrowhead
-    line(cv, ix + 306, iy + 84, ix + 304, iy + 98, (216, 48, 44), 4)
-    draw_text(cv, ix + 150, iy + 122, "1.5C OVERSHOOT", 2, (150, 40, 36), bold=True)
-    fill_rect(cv, ix, iy + 137, 448, 3, INK)
+def icon_globe(px, cx, cy):
+    """A planet with meridians and parallels, for the climate talks."""
+    r = 34
+    circle_outline(px, cx, cy, r, NAVY, 3)
+    circle_outline(px, cx, cy, r - 2, NAVY, 1)
+    # Central meridian ellipse.
+    for i in range(65):
+        a = 2 * math.pi * i / 64.0
+        x = int(round(cx + 14 * math.cos(a)))
+        y = int(round(cy + r * math.sin(a)))
+        fill_rect(px, x - 1, y - 1, 2, 2, NAVY)
+    # Straight central meridian.
+    draw_line(px, cx, cy - r, cx, cy + r, NAVY, 1)
+    # Equator and two parallels (chords of the circle).
+    for frac in (-0.45, 0.0, 0.45):
+        yy = int(round(cy + frac * r))
+        half = int(math.sqrt(max(0, r * r - (yy - cy) ** 2)))
+        draw_line(px, cx - half, yy, cx + half, yy, NAVY, 1)
+    # A small sun rising at the rim.
+    starburst(px, cx + r + 8, cy - r - 6, 8, GOLD)
 
 
-def icon_capitol(cv, ix, iy):
-    """The US Capitol: dome, columns and steps under a small flag."""
-    fill_rect(cv, ix, iy, 448, 140, (196, 214, 232))
-    cx, gy = ix + 224, iy + 132
-    stone, stone_d = (226, 224, 216), (172, 170, 160)
-    fill_rect(cv, cx - 150, gy - 8, 300, 8, stone_d)        # steps
-    fill_rect(cv, cx - 132, gy - 18, 264, 10, stone)
-    for off in (-118, -72, -26, 26, 72, 118):               # columns
-        fill_rect(cv, cx + off - 8, gy - 74, 16, 56, stone)
-        rect_outline(cv, cx + off - 8, gy - 74, 16, 56, INK, 2)
-    fill_rect(cv, cx - 140, gy - 90, 280, 16, stone)        # entablature
-    rect_outline(cv, cx - 140, gy - 90, 280, 16, INK, 2)
-    fill_circle(cv, cx, gy - 88, 42, (148, 162, 184))       # dome
-    fill_rect(cv, cx - 140, gy - 90, 280, 14, stone)
-    rect_outline(cv, cx - 140, gy - 90, 280, 14, INK, 2)
-    for k in range(5):                                      # dome ribs
-        a = math.pi * (0.14 + 0.18 * k)
-        line(cv, cx, gy - 88, int(cx + 40 * math.cos(a)), int(gy - 88 - 40 * math.sin(a)), (110, 124, 148), 2)
-    fill_rect(cv, cx - 8, gy - 136, 16, 8, stone_d)         # cupola
-    line(cv, cx, gy - 136, cx, gy - 142, INK, 3)
-    fx, fy = cx + 3, gy - 142                               # small US flag
-    fill_rect(cv, fx, fy, 26, 15, WHITE)
-    for i in range(0, 4):
-        fill_rect(cv, fx, fy + i * 4, 26, 2, (178, 34, 52))
-    fill_rect(cv, fx, fy, 11, 7, (38, 48, 110))
-    rect_outline(cv, fx, fy, 26, 15, INK, 1)
-    fill_rect(cv, cx - 150, gy - 8, 300, 3, INK)
+def icon_capitol(px, cx, cy):
+    """The US Capitol dome, columns and flag."""
+    base_y = cy + 30
+    fill_rect(px, cx - 60, base_y, 120, 4, INK)
+    # Columns.
+    for k in range(7):
+        x = cx - 48 + k * 16
+        fill_rect(px, x, cy + 8, 3, base_y - (cy + 8), INK)
+    # Entablature.
+    fill_rect(px, cx - 60, cy + 3, 120, 5, INK)
+    # Dome: two nested half arcs.
+    arc(px, cx, cy + 3, 36, math.pi, 2 * math.pi, INK, 3)
+    arc(px, cx, cy + 3, 27, math.pi, 2 * math.pi, INK, 2)
+    # Cupola and flagpole.
+    fill_rect(px, cx - 3, cy - 40, 6, 9, INK)
+    draw_line(px, cx, cy - 52, cx, cy - 40, INK, 2)
+    fill_rect(px, cx + 1, cy - 52, 13, 7, RED)
 
 
-def icon_tower(cv, ix, iy):
-    """Riyadh's PIF Tower at night, one flank torn by a missile strike."""
-    fill_rect(cv, ix, iy, 448, 140, (24, 22, 44))
-    seed = 4242                                             # deterministic stars
-    for _ in range(36):
-        seed = (1103515245 * seed + 12345) % (2 ** 31)
-        sx = ix + seed % 448
-        seed = (1103515245 * seed + 12345) % (2 ** 31)
-        sy = iy + seed % 70
-        fill_circle(cv, sx, sy, 1, (200, 204, 235))
-    dark = (38, 40, 58)
-    for bx, bw, bh in ((ix + 8, 62, 62), (ix + 82, 48, 84), (ix + 330, 52, 74),
-                       (ix + 392, 48, 54)):                 # neighbouring blocks
-        fill_rect(cv, bx, iy + 140 - bh, bw, bh, dark)
-        for wy in range(iy + 140 - bh + 7, iy + 132, 12):
-            for wx in range(bx + 6, bx + bw - 6, 11):
-                if (wx * 7 + wy * 13) % 5 == 0:
-                    fill_rect(cv, wx, wy, 4, 5, (255, 214, 110))
-    cx = ix + 224                                           # the tower
-    fill_polygon(cv, [(cx - 52, iy + 140), (cx + 52, iy + 140),
-                      (cx + 34, iy + 8), (cx - 34, iy + 8)], (66, 72, 96))
-    line(cv, cx - 52, iy + 140, cx - 34, iy + 8, INK, 3)
-    line(cv, cx + 52, iy + 140, cx + 34, iy + 8, INK, 3)
-    fill_rect(cv, cx - 34, iy + 8, 68, 4, INK)
-    for wy in range(iy + 22, iy + 132, 11):                 # lit windows
-        for wx in range(cx - 40, cx + 36, 10):
-            if (wx * 7 + wy * 13) % 4 != 0:
-                fill_rect(cv, wx, wy, 4, 5, (255, 222, 130))
-    for dx, dy, w, h in ((18, 30, 26, 10), (24, 42, 22, 9), (14, 52, 24, 10),
-                         (26, 63, 18, 8)):                  # torn flank
-        fill_rect(cv, cx + dx, iy + dy, w, h, (16, 15, 26))
-    fill_circle(cv, cx + 30, iy + 46, 8, (255, 150, 60))    # blast glow
-    fill_circle(cv, cx + 30, iy + 46, 4, (255, 220, 150))
-    for dx, dy, r in ((52, 30, 9), (66, 22, 12), (82, 16, 8)):   # smoke
-        fill_circle(cv, cx + dx, iy + dy, r, (120, 118, 132))
-    dashed_bezier(cv, (ix + 6, iy + 4), (ix + 90, iy + 8), (cx + 24, iy + 40), (255, 120, 90))
-    draw_text(cv, ix + 16, iy + 116, "PIF TOWER", 2, (255, 220, 120), bold=True)
-    fill_rect(cv, ix, iy + 137, 448, 3, INK)
+def icon_tower(px, cx, cy):
+    """A tapering skyscraper with a burst of damage near the top."""
+    top_y = cy - 38
+    base_y = cy + 36
+    # Slanted sides: half-width shrinks from 28 at the base to 17 at top.
+    steps = 24
+    for i in range(steps + 1):
+        t = i / steps
+        yy = int(round(base_y + (top_y - base_y) * t))
+        half = 28 - 11 * t
+        fill_rect(px, int(cx - half) - 1, yy, 3, 3, INK)
+        fill_rect(px, int(cx + half) - 1, yy, 3, 3, INK)
+    # Floor lines.
+    for i in range(6):
+        t = i / 6.0
+        yy = int(round(base_y - 6 - (base_y - top_y - 10) * t))
+        half = 28 - 11 * ((base_y - yy) / (base_y - top_y))
+        draw_line(px, int(cx - half), yy, int(cx + half), yy, NAVY, 1)
+    fill_rect(px, cx - 42, base_y, 84, 4, INK)
+    # Damage burst on the upper floors.
+    starburst(px, cx + 8, cy - 16, 12, RED)
 
 
-# --------------------------------------------------------------------------
-# Page assembly.
-# --------------------------------------------------------------------------
+ICONS = {
+    "bridge": icon_bridge,
+    "globe": icon_globe,
+    "capitol": icon_capitol,
+    "tower": icon_tower,
+}
+
+
+# ---------------------------------------------------------------------------
+# Page layout.
+# ---------------------------------------------------------------------------
 PANELS = [
-    ("WAR - KYIV, UKRAINE", (150, 30, 36), icon_kyiv,
-     ["RUSSIA POUNDS KYIV IN", "MASSIVE AIR ONSLAUGHT"],
-     "400 DRONES, 110 MISSILES HIT UKRAINE"),
-    ("CLIMATE - ANTALYA, TURKIYE", (24, 110, 66), icon_climate,
-     ["COP31 TALKS SPILL INTO", "OVERTIME IN ANTALYA"],
-     "DRAFT DEAL DROPS FOSSIL FUEL WORDS"),
-    ("POLITICS - WASHINGTON", (31, 58, 110), icon_capitol,
-     ["TRUMP PUTS OFF IRAN", "DECISION TO NEW YEAR"],
-     "SENATE BLOCKS WAR VOTE 51-48"),
-    ("CONFLICT - RIYADH", (140, 84, 20), icon_tower,
-     ["HOUTHI MISSILE HITS", "RIYADH'S TALLEST TOWER"],
-     "PIF TOWER DAMAGED - NO INJURIES"),
+    (
+        "UKRAINE WAR",
+        ["RUSSIA POUNDS KYIV", "IN GIANT AIR RAID"],
+        [
+            "400+ DRONES AND 110 MISSILES HIT",
+            "OVERNIGHT: 3 DNIPRO BRIDGES HIT,",
+            "9+ DEAD, DOZENS WOUNDED, POWER CUT",
+        ],
+        "bridge",
+    ),
+    (
+        "CLIMATE SUMMIT",
+        ["COP31 TALKS SPILL", "INTO OVERTIME"],
+        [
+            "THURSDAY DRAFT ERASES ALL FOSSIL",
+            "FUEL WORDS AND $120BN AID GOAL.",
+            "1.5C OVERSHOOT NOW ADMITTED.",
+        ],
+        "globe",
+    ),
+    (
+        "UNITED STATES",
+        ["TRUMP DELAYS IRAN", "DECISION TO 2027"],
+        [
+            "'I AM NOT RUSHING,' HE SAYS.",
+            "SENATE BLOCKS WAR POWERS CURB",
+            "IN 51-48 VOTE. WAR COST: $48BN.",
+        ],
+        "capitol",
+    ),
+    (
+        "MIDDLE EAST",
+        ["HOUTHI MISSILE HITS", "TALLEST PIF TOWER"],
+        [
+            "PIF TOWER, HQ OF SAUDI WEALTH",
+            "FUND: WINDOWS OUT ON 7-8 FLOORS,",
+            "FACADE BENT. NO INJURIES.",
+        ],
+        "tower",
+    ),
 ]
 
 
-def panel(cv, px, py, cat, color, icon, headline, sub):
-    fill_rect(cv, px, py, 476, 329, CARD)
-    rect_outline(cv, px, py, 476, 329, INK, 3)
-    fill_rect(cv, px, py, 476, 42, color)
-    draw_text(cv, px + 16, py + 12, cat, 2, WHITE, bold=True)
-    icon(cv, px + 14, py + 54)
-    hy = py + 210
-    for ln in headline:
-        draw_text(cv, px + 16, hy, ln, 3, INK, bold=True)
-        hy += 32
-    fill_rect(cv, px + 16, hy + 1, 60, 3, GOLD)   # gold rule above the standfirst
-    draw_text(cv, px + 16, hy + 10, sub, 2, GRAY)
+def draw_panel(px, x, y, w, h, panel):
+    category, headline, summary, icon_name = panel
+    fill_rect(px, x, y, w, h, PANEL_BG)
+    rect_outline(px, x, y, w, h, INK, 3)
+    # Category band.
+    fill_rect(px, x + 3, y + 3, w - 6, 30, NAVY)
+    draw_text_centered(px, x + w // 2, y + 11, category, 2, WHITE)
+    # Headline, two lines.
+    for i, line in enumerate(headline):
+        draw_text_centered(px, x + w // 2, y + 48 + i * 40, line, 4, INK)
+    # Icon.
+    ICONS[icon_name](px, x + w // 2, y + 168)
+    # Summary, three lines, kept clear of the panel's bottom border.
+    for i, line in enumerate(summary):
+        draw_text_centered(px, x + w // 2, y + 210 + i * 18, line, 2, INK)
+
+
+def build_page():
+    px = new_canvas()
+
+    # Top rules and a small standing line.
+    fill_rect(px, 36, 26, W - 72, 3, INK)
+    fill_rect(px, 36, 33, W - 72, 1, INK)
+    draw_text_centered(px, W // 2, 42, "ALL THE DAY'S NEWS - ONE PAGE", 2, GREY)
+
+    # Masthead.
+    draw_text_centered(px, W // 2, 64, "WORLD NEWS", 12, INK)
+
+    # Info row under the masthead.
+    draw_text(px, 36, 162, "VOL. I - NO. 47", 2, INK)
+    draw_text_centered(px, W // 2, 162, "THE WORLD IN ONE FRONT PAGE", 2, INK)
+    draw_text_right(px, W - 36, 162, "PRICE: ONE GLANCE", 2, INK)
+    fill_rect(px, 36, 184, W - 72, 2, INK)
+
+    # Date band.
+    band_y = 198
+    band_h = 118
+    fill_rect(px, 36, band_y, W - 72, band_h, NAVY)
+    draw_text_centered(px, W // 2, band_y + 18, "20 NOVEMBER 2026", 8, WHITE)
+    draw_text_centered(px, W // 2, band_y + 84, "FRIDAY", 4, GOLD)
+
+    # Dateline strip naming the four story locations.
+    fill_rect(px, 36, 332, W - 72, 2, INK)
+    draw_text_centered(px, W // 2, 344,
+                       "KYIV - ANTALYA - WASHINGTON - RIYADH", 3, RED)
+    fill_rect(px, 36, 372, W - 72, 2, INK)
+
+    # Four panels in a 2x2 grid.
+    grid_x = 36
+    grid_y = 390
+    pw = (W - 72 - 16) // 2
+    ph = 272
+    for idx, panel in enumerate(PANELS):
+        col = idx % 2
+        row = idx // 2
+        x = grid_x + col * (pw + 16)
+        y = grid_y + row * (ph + 14)
+        draw_panel(px, x, y, pw, ph, panel)
+
+    # Footer.
+    foot_y = grid_y + 2 * ph + 14 + 18
+    fill_rect(px, 36, foot_y, W - 72, 2, INK)
+    draw_text_centered(px, W // 2, foot_y + 12,
+                       "COMPILED FROM WIRE REPORTS - FACTS AS REPORTED "
+                       "ON THE DAY", 2, GREY)
+    return px
+
+
+# ---------------------------------------------------------------------------
+# PNG encoding (zlib + struct, written by hand).
+# ---------------------------------------------------------------------------
+def png_chunk(kind, data):
+    chunk = struct.pack(">I", len(data)) + kind + data
+    chunk += struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    return chunk
+
+
+def encode_png(px):
+    raw = bytearray()
+    row_bytes = W * 3
+    for y in range(H):
+        raw.append(0)  # filter type 0 (None) for every scanline
+        start = y * row_bytes
+        raw += px[start:start + row_bytes]
+    ihdr = struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0)
+    out = bytearray()
+    out += b"\x89PNG\r\n\x1a\n"
+    out += png_chunk(b"IHDR", ihdr)
+    out += png_chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+    out += png_chunk(b"IEND", b"")
+    return bytes(out)
 
 
 def main():
-    cv = Canvas(W, H, PAPER)
-    rect_outline(cv, 12, 12, W - 24, H - 24, INK, 3)
-    # Masthead
-    fill_rect(cv, 28, 34, W - 56, 3, INK)
-    fill_rect(cv, 28, 41, W - 56, 1, INK)
-    center_text(cv, 512, 50, "ALL THE DAY'S NEWS - ON ONE PAGE", 2, GRAY)
-    center_text(cv, 512, 76, "WORLD NEWS", 11, INK, bold=True)
-    fill_rect(cv, 28, 166, W - 56, 2, INK)
-    fill_rect(cv, 28, 172, W - 56, 5, INK)
-    # Date band: the date, unmistakable
-    fill_rect(cv, 28, 190, W - 56, 100, NAVY)
-    center_text(cv, 512, 204, "20 NOVEMBER 2026", 8, WHITE, bold=True)
-    center_text(cv, 512, 268, "F R I D A Y", 2, GOLD)
-    tw = text_width("F R I D A Y", 2)              # gold rules flanking the weekday
-    fill_rect(cv, 512 - tw // 2 - 92, 274, 64, 3, GOLD)
-    fill_rect(cv, 512 + tw // 2 + 28, 274, 64, 3, GOLD)
-    # Dateline strip: where the day's four stories happened
-    center_text(cv, 512, 292, "KYIV - ANTALYA - WASHINGTON - RIYADH", 2, GRAY)
-    # Panels, 2 x 2
-    pos = [(28, 308), (520, 308), (28, 653), (520, 653)]
-    for (px, py), args in zip(pos, PANELS):
-        panel(cv, px, py, *args)
-    center_text(cv, 512, 992, "FOUR STORIES THAT DEFINED THE DAY", 2, GRAY)
-    # Write to /output/entry.png, else ./entry.png
-    try:
-        os.makedirs("/output", exist_ok=True)
-        out = "/output/entry.png"
-        cv.save(out)
-    except OSError:
-        out = "entry.png"
-        cv.save(out)
-    print("wrote", out)
+    px = build_page()
+    data = encode_png(px)
+    os.makedirs("/output", exist_ok=True)
+    with open("/output/entry.png", "wb") as fh:
+        fh.write(data)
 
 
 if __name__ == "__main__":
